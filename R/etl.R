@@ -1,22 +1,24 @@
+#' @importFrom rlang .data
+NULL
+
 #' Update the wehoop database
 #'
 #' This function is a wrapper that updates the `wehoop` database by
-#' calling `wehoop::update_db()`.
+#' calling `wehoop::update_wnba_db()`.
 #'
 #' @param dbdir Character. The directory where the database is stored. Defaults to `~/.db`.
 #' @param dbname Character. DB name, defaults to my dog `belle`
 #' @param force_rebuild Logical. If `TRUE`, forces a rebuild of the database. Defaults to `FALSE`.
-#' @param tblname name or DBI::Id(schema, table) of the table location
-#' @param dpath Path for custom db
+#' @param dbpath Path for custom db
 #'
 #' @return No return value. Updates the nflfastR database in place.
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' update_db()  # Updates the database in the default location
+#' update_wnba_db()  # Updates the database in the default location
 #' }
-update_db <- function(
+update_wnba_pbp <- function(
   dbdir = '~/.db',
   dbname = 'belle',
   force_rebuild = FALSE,
@@ -32,6 +34,40 @@ update_db <- function(
   )
 }
 
+#' Update the wehoop database
+#'
+#' This function is a wrapper that updates the `wehoop` database by
+#' calling `wehoop::update_wbb_db()`.
+#'
+#' @param dbdir Character. The directory where the database is stored. Defaults to `~/.db`.
+#' @param dbname Character. DB name, defaults to my dog `belle`
+#' @param force_rebuild Logical. If `TRUE`, forces a rebuild of the database. Defaults to `FALSE`.
+#' @param dbpath Path for custom db
+#'
+#' @return No return value. Updates the nflfastR database in place.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' update_db()  # Updates the database in the default location
+#' }
+update_ncaa_pbp <- function(
+  dbdir = '~/.db',
+  dbname = 'belle',
+  force_rebuild = FALSE,
+  dbpath = Sys.getenv("DB_PATH_WNBA")
+) {
+  db_connection <- DBI::dbConnect(duckdb::duckdb(), dbpath)
+  on.exit(DBI::dbDisconnect(db_connection), add = TRUE)
+  wehoop::update_wbb_db(
+    dbdir = dbdir,
+    dbname = dbname,
+    force_rebuild = force_rebuild,
+    db_connection = db_connection
+  )
+}
+
+
 #' Update the specified database table
 #'
 #' this function will load data into the db. It can handle creating new schemas
@@ -46,11 +82,12 @@ update_db <- function(
 #' @return No return value. Updates the specified db
 #' @export
 load_data <- function(
-    df,
-    table_name,
-    schema_name = "BASE",
-    db_path = Sys.getenv("DB_PATH_WNBA"),
-    seasons = NULL) {
+  df,
+  table_name,
+  schema_name = "BASE",
+  db_path = Sys.getenv("DB_PATH_WNBA"),
+  seasons = NULL
+) {
   # initialize db connection
   con <- DBI::dbConnect(duckdb::duckdb(), db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
@@ -60,7 +97,7 @@ load_data <- function(
     tibble::as_tibble() |>
     dplyr::mutate(
       updated_at = Sys.time(),
-      local_updated_at = updated_at - lubridate::hours(6)
+      local_updated_at = .data$updated_at - lubridate::hours(6)
     )
 
   # Create schema if it doesn't exist
@@ -125,4 +162,67 @@ load_data <- function(
   message(glue::glue(
     '{format(Sys.time(), "%H:%M:%S")} | {nrow(df)} records loaded into {schema_name}.{table_name}'
   ))
+}
+
+#' main function to update tables that are related to `{wehoop} WNBA data`.
+#'
+#' This function will update tables based on the ENV variable `DB_PATH` that is used in
+#' `load_data()`.
+#'
+#' @param seasons numeric vector to indentify seasons to back filter for and backfill.
+#' Note: this should typically only be used with `wehoop::most_recent_season()` or maintain
+#' the default value of `NULL`, as datasets have different years that started collecting. It is
+#' easier to do a full refresh than handle all the different conditions.
+#'
+#' @export
+update_wnba_db <- function(seasons = NULL) {
+  wehoop::load_wnba_schedule(seasons = seasons) |>
+    load_data(table_name = "schedule", schema_name = "wnba")
+
+  wehoop::load_wnba_player_box(seasons = seasons) |>
+    load_data(table_name = "player_box", schema_name = "wnba")
+
+  wehoop::load_wnba_team_box(seasons = seasons[seasons >= 2006]) |>
+    load_data(table_name = "team_box", schema_name = "wnba")
+}
+
+#' main function to update tables that are related to `{wehoop}` WBB data.
+#'
+#' This function will update tables based on the ENV variable `DB_PATH` that is used in
+#' `load_data()`.
+#'
+#' @param seasons numeric vector to indentify seasons to back filter for and backfill.
+#' Note: this should typically only be used with `wehoop::most_recent_season()` or maintain
+#' the default value of `NULL`, as datasets have different years that started collecting. It is
+#' easier to do a full refresh than handle all the different conditions.
+#'
+#' @export
+update_ncaa_db <- function(seasons = NULL) {
+  if (min(seasons) < 2006) {
+    seasons <- seasons[seasons >= 2006]
+  }
+  wehoop::load_wbb_schedule(seasons = seasons) |>
+    load_data(table_name = "schedule", schema_name = "ncaa")
+
+  wehoop::load_wbb_player_box(seasons = seasons) |>
+    load_data(table_name = "player_box", schema_name = "ncaa")
+
+  wehoop::load_wbb_team_box(seasons = seasons) |>
+    load_data(table_name = "team_box", schema_name = "ncaa")
+}
+
+update_static_data <- function() {
+  purrr::map(2015:2025, .f = \(x) wehoop::wnba_drafthistory(season = x)) |>
+    dplyr::bind_rows() |>
+    load_data(table_name = 'draft_history', schema_name = 'wnba')
+}
+
+main <- function(
+  force_rebuild = FALSE,
+  seasons = wehoop::most_recent_wnba_season()
+) {
+  update_wnba_pbp(force_rebuild = force_rebuild)
+  update_ncaa_pbp(force_rebuild = force_rebuild)
+  update_wnba_db()
+  update_ncaa_db()
 }
