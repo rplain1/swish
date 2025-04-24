@@ -177,13 +177,13 @@ load_data <- function(
 #' @export
 update_wnba_db <- function(seasons = NULL) {
   wehoop::load_wnba_schedule(seasons = seasons) |>
-    load_data(table_name = "schedule", schema_name = "wnba")
+    load_data(table_name = "SCHEDULE", schema_name = "WNBA")
 
   wehoop::load_wnba_player_box(seasons = seasons) |>
-    load_data(table_name = "player_box", schema_name = "wnba")
+    load_data(table_name = "PLAYER_BOX_STG", schema_name = "WNBA")
 
   wehoop::load_wnba_team_box(seasons = seasons[seasons >= 2006]) |>
-    load_data(table_name = "team_box", schema_name = "wnba")
+    load_data(table_name = "TEAM_BOX_STG", schema_name = "WNBA")
 }
 
 #' main function to update tables that are related to `{wehoop}` WBB data.
@@ -202,27 +202,33 @@ update_ncaa_db <- function(seasons = NULL) {
     seasons <- seasons[seasons >= 2006]
   }
   wehoop::load_wbb_schedule(seasons = seasons) |>
-    load_data(table_name = "schedule", schema_name = "ncaa")
+    load_data(table_name = "SCHEDULE", schema_name = "WBB")
 
   wehoop::load_wbb_player_box(seasons = seasons) |>
-    load_data(table_name = "player_box", schema_name = "ncaa")
+    load_data(table_name = "PLAYER_BOX_STG", schema_name = "WBB")
 
   wehoop::load_wbb_team_box(seasons = seasons) |>
-    load_data(table_name = "team_box", schema_name = "ncaa")
+    load_data(table_name = "TEAM_BOX_STG", schema_name = "WBB")
 }
 
+#' @export
 update_static_data <- function() {
-  purrr::map(2015:2025, .f = \(x) wehoop::wnba_drafthistory(season = x)) |>
+  purrr::map(
+    2000:2025,
+    .f = \(x)
+      wehoop::wnba_drafthistory(season = x) |>
+        purrr::pluck('DraftHistory')
+  ) |>
     dplyr::bind_rows() |>
-    load_data(table_name = 'draft_history', schema_name = 'wnba')
+    load_data(table_name = 'DRAFT_HISTORY', schema_name = 'WNBA')
 }
 
 main <- function(
   force_rebuild = FALSE,
   seasons = wehoop::most_recent_wnba_season()
 ) {
-  update_wnba_pbp(force_rebuild = force_rebuild)
-  update_ncaa_pbp(force_rebuild = force_rebuild)
-  update_wnba_db()
-  update_ncaa_db()
+  #update_wnba_pbp(force_rebuild = force_rebuild)
+  #update_ncaa_pbp(force_rebuild = force_rebuild)
+  update_wnba_db(seasons)
+  update_ncaa_db(seasons)
 }
