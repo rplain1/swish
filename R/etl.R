@@ -227,8 +227,8 @@ main <- function(
   force_rebuild = FALSE,
   seasons = wehoop::most_recent_wnba_season()
 ) {
-  #update_wnba_pbp(force_rebuild = force_rebuild)
-  #update_ncaa_pbp(force_rebuild = force_rebuild)
+  update_wnba_pbp(force_rebuild = force_rebuild)
+  update_ncaa_pbp(force_rebuild = force_rebuild)
   update_wnba_db(seasons)
   update_ncaa_db(seasons)
 }
