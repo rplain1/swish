@@ -63,3 +63,14 @@ draft_data <- tblx(wnba, player_box) |> # 1 row
   ungroup()
 
 draft_data |> filter(overall_pick == '1', experience == 1)
+
+
+con <- duckdb::dbConnect(duckdb::duckdb(), Sys.getenv("DB_PATH_WNBA"))
+
+wehoop::load_wnba_player_box(
+  c(2002:2004, 2006:wehoop::most_recent_wnba_season()),
+  dbConnection = con,
+  tablename = 'wnba_player_box'
+)
+
+duckdb::dbDisconnect(con)
