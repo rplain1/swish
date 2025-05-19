@@ -106,6 +106,12 @@ load_data <- function(
     glue::glue_sql("CREATE SCHEMA IF NOT EXISTS {`schema_name`}", .con = con)
   )
 
+  # check if all columns exist
+  schema_cols = DBI::dbExecute(
+    con,
+    glue::glue_sql("<need code here>{`schema_name`}", .con = con)
+  )
+
   if (!is.numeric(seasons)) {
     # overwrite all the existing data
     DBI::dbWriteTable(
@@ -117,7 +123,7 @@ load_data <- function(
   } else {
     # backfill or modify select values
     message(glue::glue(
-      '{format(Sys.time(), "%H:%M:%S")} | `seasons` provided set to {seasons}, updating {nrow(df)} records'
+      '{\nformat(Sys.time(), "%H:%M:%S")} | `seasons` provided set to {seasons}, \nupdating {nrow(df)} records'
     ))
 
     if (DBI::dbExistsTable(con, DBI::Id(schema_name, table_name))) {
@@ -133,10 +139,8 @@ load_data <- function(
       if (record_check[1, 1] > 0) {
         # if data exists
 
-        # TODO: look into why this outputs messages for multiple years funky
-        # `seasons` provided set to 2017, updating 192340 records14:00:55 | `seasons` provided set to 2018, updating 192340 records14:00:55 | `seasons` provided set to 2019, updating 192340 records14:00:55 | `seasons` provided set to 2020, updating 192340 records
         message(glue::glue(
-          '{format(Sys.time(), "%H:%M:%S")} | records exist for `seasons`: {seasons}, dropping existing records records'
+          '\n{format(Sys.time(), "%H:%M:%S")} | records exist for `seasons`: {seasons}, dropping existing records records {records_check[1, 1]}'
         ))
 
         DBI::dbExecute(
@@ -160,7 +164,7 @@ load_data <- function(
   }
 
   message(glue::glue(
-    '{format(Sys.time(), "%H:%M:%S")} | {nrow(df)} records loaded into {schema_name}.{table_name}'
+    '\n{format(Sys.time(), "%H:%M:%S")} | {nrow(df)} records loaded into {schema_name}.{table_name}'
   ))
 }
 
@@ -175,12 +179,16 @@ load_data <- function(
 #' easier to do a full refresh than handle all the different conditions.
 #'
 #' @export
-update_wnba_db <- function(seasons = NULL) {
+update_wnba_db <- function(seasons = wehoop::most_recent_wnba_season()) {
   wehoop::load_wnba_schedule(seasons = seasons) |>
-    load_data(table_name = "SCHEDULE", schema_name = "WNBA")
+    load_data(table_name = "SCHEDULE", schema_name = "WNBA", seasons = seasons)
 
   wehoop::load_wnba_player_box(seasons = seasons) |>
-    load_data(table_name = "PLAYER_BOX_STG", schema_name = "WNBA")
+    load_data(
+      table_name = "PLAYER_BOX_STG",
+      schema_name = "WNBA",
+      seasons = seasons
+    )
 
   wehoop::load_wnba_team_box(seasons = seasons[seasons >= 2006]) |>
     load_data(table_name = "TEAM_BOX_STG", schema_name = "WNBA")
@@ -197,7 +205,7 @@ update_wnba_db <- function(seasons = NULL) {
 #' easier to do a full refresh than handle all the different conditions.
 #'
 #' @export
-update_ncaa_db <- function(seasons = NULL) {
+update_ncaa_db <- function(seasons = wehoop::most_recent_wbb_season()) {
   if (min(seasons) < 2006) {
     seasons <- seasons[seasons >= 2006]
   }
