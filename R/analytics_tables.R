@@ -1,6 +1,6 @@
 #' @export
 create_wnba_teams <- function() {
-  swish::load_data(
+  load_data(
     con,
     wehoop::wnba_teams(),
     "TEAMS",
@@ -98,7 +98,7 @@ create_team_possessions <- function() {
     dplyr::select(season, game_id, team_id, possessions) |>
     dplyr::collect()
 
-  swish::load_data(con, df_pos, "TEAM_POSSESSIONS", "WNBA", overwrite = TRUE)
+  load_data(con, df_pos, "TEAM_POSSESSIONS", "WNBA", overwrite = TRUE)
 }
 
 #' @export
