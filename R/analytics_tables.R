@@ -40,6 +40,11 @@ create_player_box <- function() {
 #' @export
 create_team_box <- function() {
   df_team_box <- tblx(wnba, team_box_stg) |>
+    dplyr::collect() |>
+    dplyr::filter(
+      !stringr::str_starts(team_name, 'Team '),
+      !team_name %in% c('East', 'West')
+    ) |>
     dplyr::mutate(
       season_type = ifelse(
         season_type == 2,
