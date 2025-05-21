@@ -5,6 +5,10 @@ connect <- function() {
   DBI::dbConnect(duckdb::duckdb(), Sys.getenv("DB_PATH_WNBA"))
 }
 
+check_existing_connection <- function() {
+  exists("con", envir = .GlobalEnv)
+}
+
 #' I just like to make it easier for myself
 #'
 #' @param schema Character
@@ -12,7 +16,7 @@ connect <- function() {
 #'
 #' @export
 tblx <- function(schema, table) {
-  if (!exists("con", envir = .GlobalEnv)) {
+  if (!check_existing_connection()) {
     stop(
       "Database connection (`con`) not found in global environment.
           Please create a connection before using this function."

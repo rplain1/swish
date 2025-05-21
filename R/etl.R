@@ -68,88 +68,125 @@ update_ncaa_pbp <- function(
 }
 
 
-#' Update the specified database table
-#'
-#' this function will load data into the db. It can handle creating new schemas
-#' and tables, and will overwrite data if there is a specified season or set of seasons.
-#'
-#' @param df A data frame to load into the db
-#' @param table_name name of table to use in db
-#' @param schema_name name of schema to use, defaults to `"BASE"``
-#' @param db_path location of db
-#' @param seasons seasons to update when using existing database.
-#'
-#' @return No return value. Updates the specified db
-#' @export
-load_data <- function(
-  df,
-  table_name,
-  schema_name = "BASE",
-  db_path = Sys.getenv("DB_PATH_WNBA"),
-  seasons = NULL
-) {
-  # initialize db connection
-  con <- DBI::dbConnect(duckdb::duckdb(), db_path)
-  on.exit(DBI::dbDisconnect(con), add = TRUE)
-
+add_metadata <- function(df) {
   # add metadata to database load time
-  df <- df |>
+  df |>
     tibble::as_tibble() |>
     dplyr::mutate(
       updated_at = Sys.time(),
       local_updated_at = .data$updated_at - lubridate::hours(6)
     )
+}
 
-  # Create schema if it doesn't exist
+create_schema <- function(con, schema_name) {
   DBI::dbExecute(
     con,
     glue::glue_sql("CREATE SCHEMA IF NOT EXISTS {`schema_name`}", .con = con)
   )
+}
 
-  # check if all columns exist
-  schema_cols = DBI::dbExecute(
+check_records_exist <- function(
+  con,
+  schema_name,
+  table_name,
+  param_vals = NULL,
+  param = 'SEASON'
+) {
+  # check that table exists
+  DBI::dbGetQuery(
     con,
-    glue::glue_sql("<need code here>{`schema_name`}", .con = con)
+    glue::glue_sql(
+      "SELECT COUNT(*) FROM {`schema_name`}.{`table_name`} WHERE {`param`} IN ({param_vals*})",
+      vals = seasons,
+      .con = con
+    )
   )
+}
 
-  if (!is.numeric(seasons)) {
-    # overwrite all the existing data
+delete_existing_records <- function(
+  con,
+  schema_name,
+  table_name,
+  param = 'SEASON',
+  param_vals = seasons
+) {
+  # TODO: add where clause
+  #sql <- "DELETE FROM {`schema_name`}.{`table_name`}"
+
+  DBI::dbExecute(
+    con = con,
+    glue::glue_sql(
+      "DELETE FROM {`schema_name`}.{`table_name`} WHERE {`param`} IN ({param_vals*})",
+      vals = seasons,
+      .con = con
+    )
+  )
+}
+
+
+check_table_columns <- function(con, df, table_name, schema_name) {
+  db_struc <- DBI::dbGetQuery(
+    con,
+    "describe {`schema_name`}.{`table_name`}"
+  )
+  df_struc <- sapply(df, class)
+
+  list()
+}
+
+
+load_data <- function(
+  con,
+  df,
+  table_name,
+  schema_name = 'BASE',
+  param = 'SEASON',
+  param_vals = NULL,
+  overwrite = FALSE,
+  ...
+) {
+  checkmate::check_logical(overwrite)
+
+  if (is.null(param_vals)) {
+    param_vals <- unique(df[, stringr::str_to_lower(param)]) |> dplyr::pull()
+  }
+
+  .df <- add_metadata(df = df)
+  create_schema(con = con, schema_name = schema_name)
+
+  if (overwrite) {
+    message(glue::glue(
+      '\n{format(Sys.time(), "%H:%M:%S")} | `overwrite` set to {overwrite}, deleting all records...'
+    ))
+    message(glue::glue(
+      '\n{format(Sys.time(), "%H:%M:%S")} | {nrow(.df)} records loaded into {schema_name}.{table_name}'
+    ))
     DBI::dbWriteTable(
       con = con,
       name = DBI::Id(schema = schema_name, table = table_name),
-      value = df,
+      value = .df,
       overwrite = TRUE
     )
   } else {
-    # backfill or modify select values
-    message(glue::glue(
-      '{\nformat(Sys.time(), "%H:%M:%S")} | `seasons` provided set to {seasons}, \nupdating {nrow(df)} records'
-    ))
-
     if (DBI::dbExistsTable(con, DBI::Id(schema_name, table_name))) {
-      # check that table exists
-      record_check <- DBI::dbGetQuery(
-        con,
-        glue::glue_sql(
-          "SELECT COUNT(*) FROM {`schema_name`}.{`table_name`} WHERE SEASON IN ({vals*})",
-          vals = seasons,
-          .con = con
-        )
-      )
-      if (record_check[1, 1] > 0) {
-        # if data exists
-
+      # controls for modifying table
+      records_check <- check_records_exist(
+        con = con,
+        schema_name = schema_name,
+        table_name = table_name,
+        param_vals = param_vals,
+        param = param
+      ) # TODO: add param
+      if (records_check[1, 1] > 0) {
         message(glue::glue(
-          '\n{format(Sys.time(), "%H:%M:%S")} | records exist for `seasons`: {seasons}, dropping existing records records {records_check[1, 1]}'
+          '\n{format(Sys.time(), "%H:%M:%S")} | records exist for `param`: {list(param_vals)}, dropping existing records records {records_check[1, 1]}'
         ))
-
-        DBI::dbExecute(
-          con,
-          glue::glue_sql(
-            "DELETE FROM {`schema_name`}.{`table_name`} WHERE SEASON IN ({vals*})",
-            vals = seasons,
-            .con = con
-          )
+        delete_existing_records(
+          con = con,
+          table_name = table_name,
+          schema_name = schema_name,
+          param = param,
+          param_vals = param_vals
         )
       }
     }
@@ -157,86 +194,122 @@ load_data <- function(
     DBI::dbWriteTable(
       con = con,
       name = DBI::Id(schema = schema_name, table = table_name),
-      value = df,
+      value = .df,
       overwrite = FALSE,
       append = TRUE
     )
   }
-
-  message(glue::glue(
-    '\n{format(Sys.time(), "%H:%M:%S")} | {nrow(df)} records loaded into {schema_name}.{table_name}'
-  ))
 }
 
-#' main function to update tables that are related to `{wehoop} WNBA data`.
-#'
-#' This function will update tables based on the ENV variable `DB_PATH` that is used in
-#' `load_data()`.
-#'
-#' @param seasons numeric vector to indentify seasons to back filter for and backfill.
-#' Note: this should typically only be used with `wehoop::most_recent_season()` or maintain
-#' the default value of `NULL`, as datasets have different years that started collecting. It is
-#' easier to do a full refresh than handle all the different conditions.
-#'
-#' @export
-update_wnba_db <- function(seasons = wehoop::most_recent_wnba_season()) {
-  wehoop::load_wnba_schedule(seasons = seasons) |>
-    load_data(table_name = "SCHEDULE", schema_name = "WNBA", seasons = seasons)
 
-  wehoop::load_wnba_player_box(seasons = seasons) |>
-    load_data(
-      table_name = "PLAYER_BOX_STG",
-      schema_name = "WNBA",
-      seasons = seasons
+update_wnba_db <- function(
+  con,
+  seasons,
+  overwrite = FALSE
+) {
+  df <- wehoop::load_wnba_schedule(seasons = seasons) |>
+    dplyr::select(-dplyr::any_of('venue_capacity')) |>
+    dplyr::mutate(
+      status_type_alt_detail = as.character(.data$status_type_alt_detail)
     )
 
-  wehoop::load_wnba_team_box(seasons = seasons[seasons >= 2006]) |>
-    load_data(table_name = "TEAM_BOX_STG", schema_name = "WNBA")
+  load_data(
+    con,
+    df,
+    table_name = "SCHEDULE",
+    schema_name = "WNBA",
+    overwrite = overwrite
+  )
+
+  df <- wehoop::load_wnba_player_box(seasons = seasons)
+  load_data(
+    con,
+    df,
+    table_name = "PLAYER_BOX_STG",
+    schema_name = "WNBA",
+    overwrite = overwrite
+  )
+
+  df <- wehoop::load_wnba_team_box(seasons = seasons[seasons >= 2006])
+  load_data(
+    con,
+    df,
+    table_name = "TEAM_BOX_STG",
+    schema_name = "WNBA",
+    overwrite = overwrite
+  )
 }
 
-#' main function to update tables that are related to `{wehoop}` WBB data.
-#'
-#' This function will update tables based on the ENV variable `DB_PATH` that is used in
-#' `load_data()`.
-#'
-#' @param seasons numeric vector to indentify seasons to back filter for and backfill.
-#' Note: this should typically only be used with `wehoop::most_recent_season()` or maintain
-#' the default value of `NULL`, as datasets have different years that started collecting. It is
-#' easier to do a full refresh than handle all the different conditions.
-#'
-#' @export
-update_ncaa_db <- function(seasons = wehoop::most_recent_wbb_season()) {
+
+update_ncaa_db <- function(con, seasons, overwrite = FALSE) {
   if (min(seasons) < 2006) {
     seasons <- seasons[seasons >= 2006]
   }
-  wehoop::load_wbb_schedule(seasons = seasons) |>
-    load_data(table_name = "SCHEDULE", schema_name = "WBB")
+  df <- wehoop::load_wbb_schedule(seasons = seasons)
+  load_data(
+    con,
+    df,
+    table_name = "SCHEDULE",
+    schema_name = "WBB",
+    overwrite = overwrite
+  )
 
-  wehoop::load_wbb_player_box(seasons = seasons) |>
-    load_data(table_name = "PLAYER_BOX_STG", schema_name = "WBB")
+  df <- wehoop::load_wbb_player_box(seasons = seasons)
+  load_data(
+    con,
+    df,
+    table_name = "PLAYER_BOX_STG",
+    schema_name = "WBB",
+    overwrite = overwrite
+  )
 
-  wehoop::load_wbb_team_box(seasons = seasons) |>
-    load_data(table_name = "TEAM_BOX_STG", schema_name = "WBB")
+  df <- wehoop::load_wbb_team_box(seasons = seasons)
+  load_data(
+    con,
+    df,
+    table_name = "TEAM_BOX_STG",
+    schema_name = "WBB",
+    overwrite = overwrite
+  )
 }
 
 #' @export
-update_static_data <- function() {
-  purrr::map(
-    2000:2025,
+update_static_data <- function(
+  con,
+  seasons = 2000:wehoop::most_recent_wnba_season()
+) {
+  df <- purrr::map(
+    seasons,
     .f = \(x)
       wehoop::wnba_drafthistory(season = x) |>
         purrr::pluck('DraftHistory')
   ) |>
-    dplyr::bind_rows() |>
-    load_data(table_name = 'DRAFT_HISTORY', schema_name = 'WNBA')
+    dplyr::bind_rows()
+  load_data(
+    con,
+    df,
+    table_name = 'DRAFT_HISTORY',
+    schema_name = 'WNBA',
+    param = "SEASON",
+    param_vals = seasons,
+    overwrite = TRUE
+  )
 }
 
-main <- function(
+main_wnba <- function(
+  con,
   force_rebuild = FALSE,
   seasons = wehoop::most_recent_wnba_season()
 ) {
   update_wnba_pbp(force_rebuild = force_rebuild)
+  update_wnba_db(con, seasons)
+}
+
+main_wbb <- function(
+  con,
+  force_rebuild = FALSE,
+  seasons = wehoop::most_recent_wbb_season()
+) {
   update_ncaa_pbp(force_rebuild = force_rebuild)
-  update_wnba_db(seasons)
-  update_ncaa_db(seasons)
+  update_ncaa_db(con, seasons)
 }
